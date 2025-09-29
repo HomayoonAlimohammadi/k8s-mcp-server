@@ -16,8 +16,10 @@ type Config struct {
 
 // ServerConfig holds server-specific configuration
 type ServerConfig struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
+	Address         string `json:"address"` // e.g., ":8080"
+	Name            string `json:"name"`
+	Version         string `json:"version"`
+	ShutdownTimeout int    `json:"shutdown_timeout"` // in seconds
 }
 
 // KubernetesConfig holds Kubernetes client configuration
@@ -37,7 +39,7 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		Server: ServerConfig{
 			Name:    getEnvWithDefault("SERVER_NAME", "k8s-mcp-server"),
-			Version: getEnvWithDefault("SERVER_VERSION", "2.0.0"),
+			Version: getEnvWithDefault("SERVER_VERSION", "1.0.0"),
 		},
 		Kubernetes: KubernetesConfig{
 			KubeConfig: getKubeConfigPath(),
@@ -65,10 +67,10 @@ func getKubeConfigPath() string {
 	if kubeconfig := os.Getenv("KUBECONFIG"); kubeconfig != "" {
 		return kubeconfig
 	}
-	
+
 	if home := homedir.HomeDir(); home != "" {
 		return filepath.Join(home, ".kube", "config")
 	}
-	
+
 	return ""
 }

@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
+	"time"
 
 	"github.com/HomayoonAlimohammadi/k8s-mcp-server/internal/config"
 	"github.com/HomayoonAlimohammadi/k8s-mcp-server/internal/handlers"
 	"github.com/HomayoonAlimohammadi/k8s-mcp-server/internal/k8s"
+	"github.com/HomayoonAlimohammadi/k8s-mcp-server/internal/tools"
 	"github.com/mark3labs/mcp-go/server"
 )
 
@@ -17,8 +18,8 @@ type Server struct {
 	config       *config.Config
 	logger       *slog.Logger
 	mcpServer    *server.MCPServer
-	toolHandlers *handlers.ToolHandlers
-	stdioServer  *server.StdioServer
+	toolHandlers *handlers.ToolHandler
+	httpServer   *server.StreamableHTTPServer
 }
 
 // New creates a new server instance
@@ -29,10 +30,6 @@ func New(cfg *config.Config, logger *slog.Logger) (*Server, error) {
 		return nil, fmt.Errorf("failed to create kubernetes client: %w", err)
 	}
 
-	// Create tool handlers
-	toolHandlers := handlers.NewToolHandlers(k8sClient, logger)
-
-	// Create MCP server with capabilities
 	mcpServer := server.NewMCPServer(
 		cfg.Server.Name,
 		cfg.Server.Version,
@@ -41,19 +38,18 @@ func New(cfg *config.Config, logger *slog.Logger) (*Server, error) {
 	)
 
 	// Register all tools
-	for _, tool := range toolHandlers.GetTools() {
-		mcpServer.AddTool(tool, toolHandlers.HandleTool)
-	}
+	toolHandlers := handlers.NewToolHandler(k8sClient, logger)
+	mcpServer.AddTool(tools.GetResource, toolHandlers.GetResources)
+	mcpServer.AddTool(tools.ListResources, toolHandlers.ListResources)
 
-	// Create stdio server
-	stdioServer := server.NewStdioServer(mcpServer)
+	httpServer := server.NewStreamableHTTPServer(mcpServer)
 
 	return &Server{
 		config:       cfg,
 		logger:       logger,
 		mcpServer:    mcpServer,
 		toolHandlers: toolHandlers,
-		stdioServer:  stdioServer,
+		httpServer:   httpServer,
 	}, nil
 }
 
@@ -64,6 +60,17 @@ func (s *Server) Run(ctx context.Context) error {
 		"version", s.config.Server.Version,
 	)
 
-	// Start the stdio server
-	return s.stdioServer.Listen(ctx, os.Stdin, os.Stdout)
+	go s.httpServer.Start(s.config.Server.Address)
+
+	<-ctx.Done()
+	s.logger.Info("Context cancelled, shutting down K8s MCP Server")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(s.config.Server.ShutdownTimeout)*time.Second)
+	defer cancel()
+
+	if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
+		s.logger.Error("Failed to shut down HTTP server", "error", err)
+	}
+
+	return nil
 }

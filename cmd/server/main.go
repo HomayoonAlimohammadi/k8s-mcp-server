@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -12,15 +13,21 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-
 	cfg, err := config.Load()
 	if err != nil {
-		logger.Error("Failed to load configuration", "error", err)
+		log.Fatalf("Failed to load configuration: %v\n", err)
 		os.Exit(1)
 	}
+
+	var logLevel *slog.Level
+	if err := logLevel.UnmarshalText([]byte(cfg.Logging.Level)); err != nil {
+		log.Fatalf("Failed to parse log level: %v\n", err)
+		os.Exit(1)
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: logLevel,
+	}))
 
 	srv, err := server.New(cfg, logger)
 	if err != nil {
